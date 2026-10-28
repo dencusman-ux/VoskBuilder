@@ -1,0 +1,63 @@
+name: Build Windows Installer
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version (e.g. 0.4.6)"
+        required: true
+        default: "0.0.0"
+
+jobs:
+  build:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Determine version
+        id: ver
+        shell: pwsh
+        run: |
+          $v = "${{ github.event.inputs.version }}"
+          if ("${{ github.event_name }}" -eq "push" -and "${{ github.ref_type }}" -eq "tag") {
+            $v = "${{ github.ref_name }}".TrimStart('v')
+          }
+          if (-not $v) { $v = "0.0.0" }
+          "version=$v" >> $env:GITHUB_OUTPUT
+
+      - name: Build installer
+        run: python build.py --version "${{ steps.ver.outputs.version }}" --clean
+        env:
+          APP_ICON: kagebrowser_logo.ico
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: KageBrowser-installer
+          path: artifacts/*Setup.exe
+          if-no-files-found: warn
+
+      - name: Create release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*Setup.exe
+          generate_release_notes: true
